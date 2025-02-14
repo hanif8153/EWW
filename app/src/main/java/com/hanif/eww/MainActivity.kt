@@ -96,15 +96,29 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun DynamicInputScreen(modifier: Modifier = Modifier, onSubmit: (List<String>) -> Unit) {
     var inputs by remember { mutableStateOf(listOf("")) }
-    val context = LocalContext.current
+    var touchedFields by remember { mutableStateOf(mutableSetOf<Int>()) }
 
     val state = rememberReorderableLazyListState(
         onMove = { from, to ->
             inputs = inputs.toMutableList().apply {
                 add(to.index, removeAt(from.index))
             }
+            touchedFields = touchedFields.map { index ->
+                when {
+                    index == from.index -> to.index
+                    index in minOf(from.index, to.index)..maxOf(from.index, to.index) ->
+                        if (from.index < to.index) index - 1 else index + 1
+                    else -> index
+                }
+            }.toMutableSet()
         }
     )
+
+    // Validation function for single input
+    fun isValidInput(input: String): Boolean = input.length in 6..10
+
+    // Validation function for all inputs
+    fun areAllInputsValid(): Boolean = inputs.all { isValidInput(it) }
 
     Scaffold(
         modifier = modifier,
@@ -129,9 +143,13 @@ fun DynamicInputScreen(modifier: Modifier = Modifier, onSubmit: (List<String>) -
             }
             InputListComposable(
                 inputs = inputs,
+                touchedFields = touchedFields,
                 onInputChange = { index, value ->
                     inputs = inputs.toMutableList().apply {
                         this[index] = value
+                    }
+                    touchedFields = touchedFields.toMutableSet().apply {
+                        add(index)
                     }
                 },
                 onDelete = {
@@ -139,23 +157,22 @@ fun DynamicInputScreen(modifier: Modifier = Modifier, onSubmit: (List<String>) -
                         inputs = inputs.toMutableList().apply {
                             removeAt(index = it)
                         }
+                        touchedFields = touchedFields.filter { index -> index < it }.toMutableSet()
                     }
                 },
+                isValidInput = ::isValidInput,
                 state = state,
                 modifier = Modifier.weight(1f)
             )
             Button(
                 onClick = {
-                    val isValidate = inputs.any { it.length in 6..10 }
-                    if (isValidate) {
+                    // Mark all fields as touched when submitting
+                    touchedFields = inputs.indices.toMutableSet()
+                    if (areAllInputsValid()) {
                         onSubmit(inputs)
-                    } else {
-                        Toast.makeText(
-                            context,
-                            "Input must be 6 to 10 characters", Toast.LENGTH_LONG
-                        ).show()
                     }
                 },
+                enabled = areAllInputsValid(),  // Disable button if any input is invalid
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Submit")
@@ -167,12 +184,13 @@ fun DynamicInputScreen(modifier: Modifier = Modifier, onSubmit: (List<String>) -
 @Composable
 fun InputListComposable(
     inputs: List<String>,
+    touchedFields: Set<Int>,
     onInputChange: (Int, String) -> Unit,
     onDelete: (Int) -> Unit,
+    isValidInput: (String) -> Boolean,
     state: ReorderableLazyListState,
     modifier: Modifier = Modifier
 ) {
-
     LazyColumn(
         modifier = modifier
             .reorderable(state)
@@ -181,13 +199,12 @@ fun InputListComposable(
         state = state.listState
     ) {
         itemsIndexed(items = inputs) { index, item ->
-            InputFiledComposable(
+            InputFieldComposable(
                 value = item,
                 onValueChange = { onInputChange(index, it) },
-                onDelete = {
-                    onDelete(index)
-                },
+                onDelete = { onDelete(index) },
                 isLastItem = index == inputs.lastIndex,
+                showError = touchedFields.contains(index) && !isValidInput(item),
                 modifier = Modifier
                     .fillMaxWidth()
                     .then(
@@ -196,38 +213,50 @@ fun InputListComposable(
             )
         }
     }
-
 }
 
 @Composable
-fun InputFiledComposable(
+fun InputFieldComposable(
     value: String,
     onValueChange: (String) -> Unit,
     onDelete: () -> Unit,
     isLastItem: Boolean,
+    showError: Boolean,
     modifier: Modifier = Modifier
 ) {
     val focus = LocalFocusManager.current
-    Row(
+    Column(
         modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            modifier = Modifier.weight(1f),
-            placeholder = { Text("Enter the value between 6 to 12 ", fontSize = 12.sp) },
-            keyboardOptions = KeyboardOptions(
-                imeAction = if (isLastItem) ImeAction.Done else ImeAction.Next
-            ),
-            keyboardActions = KeyboardActions(
-                onDone = { focus.clearFocus() }
-            ),
-            singleLine = true
-        )
-        IconButton(onClick = onDelete) {
-            Icon(Icons.Default.Close, "delete")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("Enter the value between 6 to 10", fontSize = 12.sp) },
+                keyboardOptions = KeyboardOptions(
+                    imeAction = if (isLastItem) ImeAction.Done else ImeAction.Next
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = { focus.clearFocus() }
+                ),
+                isError = showError,
+                singleLine = true
+            )
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Default.Close, "delete")
+            }
+        }
+        if (showError) {
+            Text(
+                text = "Input must be 6 to 10 characters",
+                color = androidx.compose.material3.MaterialTheme.colorScheme.error,
+                fontSize = 12.sp
+            )
         }
     }
 }
